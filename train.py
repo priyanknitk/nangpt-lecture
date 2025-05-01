@@ -1,3 +1,4 @@
+# pylint: disable=C0103,W0621,C3001
 """
 A simple language model using PyTorch.
 """
@@ -13,6 +14,7 @@ eval_interval = 300
 learning_rate = 1e-2
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
+n_embd = 32
 # ------------------
 
 torch.manual_seed(1337)
@@ -30,8 +32,8 @@ chars = sorted(list(set(text)))
 vocab_size = len(chars)
 stoi = {ch: i for i, ch in enumerate(chars)}
 itos = dict(enumerate(chars))  # reverse mapping from indices to characters
-encode = lambda s: [stoi[c] for c in s]          # string ➜ list[int]
-decode = lambda indices: ''.join([itos[i] for i in indices])  # list[int] ➜ string
+encode = lambda s: [stoi[c] for c in s]  # noqa: E731
+decode = lambda indices: ''.join([itos[i] for i in indices])  # noqa: E731
 
 # ------------------------------------------------------------------
 # 3. Data tensors and train/val split
@@ -53,9 +55,10 @@ def get_batch(split: str):
     """
     data_ = train_data if split == 'train' else val_data
     ix = torch.randint(len(data_) - block_size, (batch_size,))
-    x = torch.stack([data_[i:i + block_size]       for i in ix])
+    x = torch.stack([data_[i:i + block_size] for i in ix])
     y = torch.stack([data_[i + 1:i + block_size + 1] for i in ix])
     return x, y
+
 
 @torch.no_grad()
 def estimate_loss():
@@ -82,15 +85,21 @@ class BigramLanguageModel(nn.Module):
     """
     A simple bigram language model.
     """
-    def __init__(self, vocab_size: int):
+    def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+        self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
         """
         Forward pass of the model.
         """
-        logits = self.token_embedding_table(idx)        # (B, T, C)
+        B, T = idx.shape
+        tok_emb = self.token_embedding_table(idx)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device))
+        x = tok_emb + pos_emb  # (B, T, C)
+        logits = self.lm_head(x)                   # (B, T, vocab_size)
         loss = None
         if targets is not None:
             B, T, C = logits.shape
@@ -107,7 +116,7 @@ class BigramLanguageModel(nn.Module):
         for _ in range(max_new_tokens):
             logits, _ = self(idx)
             logits = logits[:, -1, :]          # (B, C)
-            probs = F.softmax(logits, dim=-1) # (B, C)
+            probs = F.softmax(logits, dim=-1)  # (B, C)
             idx_next = torch.multinomial(probs, num_samples=1)  # (B, 1)
             idx = torch.cat((idx, idx_next), dim=1)  # (B, T+1)
         return idx
@@ -116,7 +125,7 @@ class BigramLanguageModel(nn.Module):
 # ------------------------------------------------------------------
 # 7. Instantiate model
 # ------------------------------------------------------------------
-model = BigramLanguageModel(vocab_size)
+model = BigramLanguageModel()
 m = model.to(device)
 # ------------------------------------------------------------------
 # 8. Optimizer and training loop
@@ -126,7 +135,10 @@ for step in range(max_iters):
 
     if step % eval_interval == 0:
         losses = estimate_loss()
-        print(f"step {step}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        print(
+            f"step {step}: train loss {losses['train']:.4f}, "
+            f"val loss {losses['val']:.4f}"
+        )
 
     xb, yb = get_batch('train')
     logits, loss = model(xb, yb)
