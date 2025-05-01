@@ -77,6 +77,32 @@ def estimate_loss():
     model.train()
     return out
 
+# -----------------------------------------------------------------
+# Attention head
+# -----------------------------------------------------------------
+class Head(nn.Module):
+    """A single attention head."""
+    def __init__(self, head_size):
+        super().__init__()
+        self.key = nn.Linear(n_embd, head_size, bias=False)
+        self.query = nn.Linear(n_embd, head_size, bias=False)
+        self.value = nn.Linear(n_embd, head_size, bias=False)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
+    
+    def forward(self, x):
+        B, T, C = x.shape
+        k = self.key(x)
+        q = self.query(x)
+
+        # calculate attention scores
+        wei = (q @ k.transpose(-2, -1)) * (C ** -0.5)
+        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
+        wei = F.softmax(wei, dim=-1)
+        v = self.value(x)
+        out = wei @ v
+        return out
+
+
 
 # ------------------------------------------------------------------
 # 6. Bigram language model
@@ -89,6 +115,7 @@ class BigramLanguageModel(nn.Module):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        self.sa_head = Head(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -99,6 +126,7 @@ class BigramLanguageModel(nn.Module):
         tok_emb = self.token_embedding_table(idx)
         pos_emb = self.position_embedding_table(torch.arange(T, device=device))
         x = tok_emb + pos_emb  # (B, T, C)
+        x = self.sa_head(x)  # (B, T, C)
         logits = self.lm_head(x)                   # (B, T, vocab_size)
         loss = None
         if targets is not None:
@@ -114,7 +142,9 @@ class BigramLanguageModel(nn.Module):
         Generate new tokens from the model.
         """
         for _ in range(max_new_tokens):
-            logits, _ = self(idx)
+            # crop the context if needed
+            idx_cond = idx[:, -block_size:]
+            logits, _ = self(idx_cond)
             logits = logits[:, -1, :]          # (B, C)
             probs = F.softmax(logits, dim=-1)  # (B, C)
             idx_next = torch.multinomial(probs, num_samples=1)  # (B, 1)
