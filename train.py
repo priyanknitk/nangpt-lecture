@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 # hyperparameters
 batch_size = 32
-block_size = 8
+block_size = 512
 max_iters = 3000
 eval_interval = 300
 learning_rate = 1e-2
@@ -77,6 +77,7 @@ def estimate_loss():
     model.train()
     return out
 
+
 # -----------------------------------------------------------------
 # Attention head
 # -----------------------------------------------------------------
@@ -87,10 +88,14 @@ class Head(nn.Module):
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
-        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
-    
+        self.register_buffer(
+            'tril', torch.tril(torch.ones(block_size, block_size)))
+
     def forward(self, x):
-        B, T, C = x.shape
+        """
+        Forward pass of the attention head.
+        """
+        _, T, C = x.shape
         k = self.key(x)
         q = self.query(x)
 
@@ -101,7 +106,6 @@ class Head(nn.Module):
         v = self.value(x)
         out = wei @ v
         return out
-
 
 
 # ------------------------------------------------------------------
